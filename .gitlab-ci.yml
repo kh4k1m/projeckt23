@@ -1,0 +1,112 @@
+image: python:3.8
+
+variables:
+  DOCKER_IMAGE: $CI_REGISTRY_IMAGE
+  DOCKER_TAG: $CI_COMMIT_SHORT_SHA
+
+stages:
+  - prepare
+  - build
+  - lint
+  - tests
+  - deploy
+
+.ssh_key_template: &ssh_key_template
+  before_script:
+    - chmod 400 $SSH_PRIVATE_KEY
+    - mkdir -p ~/.ssh
+    - cp $SSH_PRIVATE_KEY ~/.ssh/id_rsa
+    - chmod 400 ~/.ssh/id_rsa
+
+  after_script:
+    - rm -f ~/.ssh/id_rsa
+
+pull_model:
+  <<: *ssh_key_template
+  stage: prepare
+  script:
+    - make install_dvc
+    - make download_weights
+  artifacts:
+    paths:
+      - weights/*.pt
+    expire_in: 1 day
+
+
+.docker_login: &docker_login
+  - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+
+.docker_common: &docker_common
+  image: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  services:
+    - docker:20.10.5-dind
+
+
+build_image:
+  stage: build
+  <<: *docker_common
+  script:
+    - *docker_login
+    - docker pull $CI_REGISTRY_IMAGE:latest || true
+    - docker build --cache-from $DOCKER_IMAGE:latest --tag ${DOCKER_IMAGE}:${DOCKER_TAG} --tag ${DOCKER_IMAGE}:latest .
+    - docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+    - docker push ${DOCKER_IMAGE}:latest
+  needs:
+    - pull_model
+
+lint:
+    stage: lint
+    <<: *docker_common
+    script:
+      - *docker_login
+      - docker pull ${DOCKER_IMAGE}:${DOCKER_TAG}
+      - docker run ${DOCKER_IMAGE}:${DOCKER_TAG} bash -c 'make lint'
+    needs:
+      - build_image
+
+unit_tests:
+    stage: tests
+    <<: *docker_common
+    script:
+      - *docker_login
+      - docker pull ${DOCKER_IMAGE}:${DOCKER_TAG}
+      - docker run ${DOCKER_IMAGE}:${DOCKER_TAG} bash -c 'make run_unit_tests'
+    needs:
+      - build_image
+
+integration_tests:
+    stage: tests
+    <<: *docker_common
+    script:
+      - *docker_login
+      - docker pull ${DOCKER_IMAGE}:${DOCKER_TAG}
+      - docker run ${DOCKER_IMAGE}:${DOCKER_TAG} bash -c 'make run_integration_tests'
+    needs:
+      - build_image
+
+deploy:
+  stage: deploy
+  variables:
+    ANSIBLE_HOST_KEY_CHECKING: "false"
+  script:
+    - python3 -m pip install ansible==6.0.0
+    - make deploy DOCKER_IMAGE=${DOCKER_IMAGE} DOCKER_TAG=${DOCKER_TAG}
+
+  when: manual
+  <<: *ssh_key_template
+
+destroy:
+  stage: deploy
+  variables:
+    ANSIBLE_HOST_KEY_CHECKING: "false"
+  script:
+    - python3 -m pip install ansible==6.0.0
+    - make destroy
+
+  when: manual
+  <<: *ssh_key_template
+
+
