@@ -12,9 +12,9 @@
 docker pull kh4k1m/project23:latest
 ```
 #### Запуск образа
-- Изменить /mnt/c/Users/salim/Projects/Project23/data/sample_videos на свой путь к папке с локальными данными
+- Изменить С/Users/Project23/data/sample_videos на свой путь к папке с локальными данными
 ```sh
-- docker run --gpus all --ipc=host --ulimit memlock=-1 -p 8501:8501 -it --ulimit stack=67108864 -v /mnt/c/Users/salim/Projects/Project23/data/sample_videos:/workspace/local_data kh4k1m/project23
+- docker run --gpus all --ipc=host --ulimit memlock=-1 -p 8501:8501 -it --ulimit stack=67108864 -v С/Users/Project23/data/sample_videos:/workspace/local_data kh4k1m/project23
 ``` 
 - Войти по адресу в браузерной строке
 ```sh
