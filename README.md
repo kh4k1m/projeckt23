@@ -61,6 +61,8 @@ http://localhost:8501
     - Отключение масштабирования изображения, так как часть объектов представляет с собой малый размер  
     -  Кастомный mosaic для больших объектах, так как эти объекты неинформативны. Эта идея помогает добиться уменьшения размера объекта без вреда для малых объектов  
     - Рандомные геометрические преобразования (Аффиновые, повороты)
+
+
     <img src="https://github.com/kh4k1m/projeckt23/blob/main/images/custom0.jpg" width="300" height="300">
     <img src="https://github.com/kh4k1m/projeckt23/blob/main/images/custom1.jpg" width="300" height="300">
     <img src="https://github.com/kh4k1m/projeckt23/blob/main/images/custom3.jpg" width="300" height="300">
