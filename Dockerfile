@@ -33,6 +33,7 @@ RUN pip install pillow==10.3.0
 RUN pip install requests==2.32.3
 RUN pip install av
 RUN pip install dill
+RUN pip install ultralytics==8.2.41
 # Create working directory
 RUN mkdir -p /workspace
 WORKDIR /workspace

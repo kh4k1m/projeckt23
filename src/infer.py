@@ -11,26 +11,35 @@ from math import ceil
 
 from detect import Detector
 from t_utils import prepare4streamlit, save_auto_annot
-
+from tracker import Track
+import numpy as np
+import cv2
 
 jpeg = TurboJPEG()
 
 
-def image_input(model, confidence, batch_size, cfg_model_path):
+def image_input(model, confidence, batch_size):
     img_file = None
-    infer_image = Detector(model, confidence=confidence, nms_thresh=0.35, num_classes=80, draw_bbox=True)
+    infer_image = Detector(model, confidence=confidence, nms_thresh=0.35, num_classes=5, draw_bbox=True)
     img_bytes = st.sidebar.file_uploader("Загрузить изображение", type=['png', 'jpeg', 'jpg', 'JPG', 'JPEG', 'PNG'])
     if img_bytes:
         img_file = "data/uploaded_data/upload." + img_bytes.name.split('.')[-1]
-        Image.open(img_bytes).save(img_file)
+        # Image.open(img_bytes).save(img_file)
+        # print(dir(img_bytes.read()))
+        image = np.asarray(bytearray(img_bytes.read()), dtype=np.uint8)
+        image = cv2.imdecode(image, -1)[:, :, ::-1] 
 
     if img_file:
-        drawed_img, boxes, scores, labels = infer_image(img_file)
+        drawed_img, boxes, scores, labels = infer_image(image)
+        if isinstance(drawed_img, Image.Image):
+            pass
+        elif isinstance(drawed_img[0], torch.Tensor):
+            drawed_img = drawed_img[0].cpu().numpy()
         st.image(drawed_img, caption="Предсказание")
 
 
-def folder_image_input(model, confidence, batch_size, root_dir, cfg_model_path):
-    infer_image = Detector(model, confidence=confidence, nms_thresh=0.35, num_classes=80, draw_bbox=False)
+def folder_image_input(model, confidence, batch_size, root_dir):
+    infer_image = Detector(model, confidence=confidence, nms_thresh=0.35, num_classes=5, draw_bbox=False)
     st.sidebar.markdown("Началась оффлайн обработка фото с папки!")
     height = 640
     width = 640
@@ -72,6 +81,7 @@ def folder_image_input(model, confidence, batch_size, root_dir, cfg_model_path):
         batch = torch.nn.functional.interpolate(batch, size=(height, width))
         output_imgs, boxes, scores, labels = infer_image(batch)
         curr_time = time.time()
+
         save_auto_annot(lbl_file, boxes, labels)
         fps = (1 / (curr_time - prev_time))
         prev_time = curr_time
@@ -86,14 +96,14 @@ def folder_image_input(model, confidence, batch_size, root_dir, cfg_model_path):
 
 
 
-def video_input(model, confidence, batch_size, cfg_model_path):
-    infer_image = Detector(model, confidence=confidence, nms_thresh=0.35, num_classes=80, draw_bbox=True)
+def video_input(model, confidence, batch_size):
+    infer_image = Detector(model, confidence=confidence, nms_thresh=0.35, num_classes=5, draw_bbox=True)
     vid_file = None
     vid_bytes = st.sidebar.file_uploader("Загрузить видео", type=['mp4', 'mpv', 'avi', 'mov'])
     if not vid_bytes:
         return
     if vid_bytes:
-        vid_file = "data/uploaded_data/upload." + vid_bytes.name.split('.')[-1]
+        vid_file = "data/uploaded_data/" + vid_bytes.name
         with open(vid_file, 'wb') as out:
             out.write(vid_bytes.read())
         del vid_bytes
@@ -104,6 +114,7 @@ def video_input(model, confidence, batch_size, cfg_model_path):
 
         video_fps = vmetadata['video_fps']
         audio_fps = vmetadata['audio_fps']
+        tracker = Track(video_fps, batch_size)
         _, height, width, _ = vframes.shape
         height = ceil(height / 64) * 64
         width = ceil(width / 64) * 64
@@ -130,6 +141,7 @@ def video_input(model, confidence, batch_size, cfg_model_path):
         for i in range(0, len_f, batch_size):
             batch = vframes[i:i+batch_size] 
             output_imgs, boxes, scores, labels = infer_image(batch)
+            tracker.update(boxes, scores, labels, i)
             if height > width:
                 output_imgs = prepare4streamlit(output_imgs, height, width)
             video_array += output_imgs
@@ -151,18 +163,36 @@ def video_input(model, confidence, batch_size, cfg_model_path):
             audio_fps=audio_fps,
             audio_codec='mp3'
             )
+        extention_len = len(vid_file.split('.')[-1])
+        track_path = vid_file[:-extention_len] + 'json'
+        tracker.encode()
 
         st.markdown("---")
 
         video_file = open(vid_file, 'rb')
         video_bytes = video_file.read()
-        st.sidebar.download_button('Сохранить видео', video_file, file_name=os.path.basename(vid_file))
         st.video(video_bytes)
+        st.download_button('Сохранить видео', video_file, file_name=os.path.basename(vid_file))
+        st.download_button('Сохранить разметку кадров', tracker.encode(), file_name=os.path.basename(track_path))
 
-def folder_video_input(model, confidence, batch_size, root_dir, cfg_model_path):
-    infer_image = Detector(model, confidence=confidence, nms_thresh=0.35, num_classes=80, draw_bbox=True)
+
+def folder_video_input(model, confidence, batch_size, root_dir):
+    infer_image = Detector(model, confidence=confidence, nms_thresh=0.35, num_classes=5, draw_bbox=True)
     st.sidebar.markdown("Началась оффлайн обработка видео с папки!")
     start_time = time.time()
+    st1, st2, st3, st4 = st.columns(4)
+    with st1:
+        st.markdown("## Height")
+        st1_text = st.markdown("0")
+    with st2:
+        st.markdown("## Width")
+        st2_text = st.markdown("0")
+    with st3:
+        st.markdown("## FPS")
+        st3_text = st.markdown("0")
+    with st4:
+        st.markdown("## Process")
+        st4_text = st.markdown(f"{0}/0 кадров")
     for address, dirs, files in os.walk(root_dir):
         for name in files:
             endswith = pathlib.PurePosixPath(name).suffix
@@ -174,6 +204,7 @@ def folder_video_input(model, confidence, batch_size, root_dir, cfg_model_path):
 
                 video_fps = vmetadata['video_fps']
                 audio_fps = vmetadata['audio_fps']
+                tracker = Track(video_fps, batch_size)
                 _, height, width, _ = vframes.shape
                 height = ceil(height / 64) * 64
                 width = ceil(width / 64) * 64
@@ -181,25 +212,17 @@ def folder_video_input(model, confidence, batch_size, root_dir, cfg_model_path):
                 prev_time = 0
                 curr_time = 0
                 fps = 0
-                st1, st2, st3, st4 = st.columns(4)
-                with st1:
-                    st.markdown("## Height")
-                    st1_text = st.markdown(f"{height}")
-                with st2:
-                    st.markdown("## Width")
-                    st2_text = st.markdown(f"{width}")
-                with st3:
-                    st.markdown("## FPS")
-                    st3_text = st.markdown(f"{fps}")
-                with st4:
-                    st.markdown("## Process")
-                    st4_text = st.markdown(f"{0}/{len_f} кадров")
+                st1_text.markdown(f"**{height}**")
+                st2_text.markdown(f"**{width}**")
+                st3_text.markdown(f"**{fps:.2f}**")
+                st4_text.markdown(f"**{0}/{len_f} кадров**")
                 vframes = torch.nn.functional.interpolate(vframes.permute((0, 3, 1, 2)), size=(height, width))
                 video_array = []
                 
                 for i in range(0, len_f, batch_size):
                     batch = vframes[i:i+batch_size] 
                     output_imgs, boxes, scores, labels = infer_image(batch)
+                    tracker.update(boxes, scores, labels, i)
                     if height > width:
                         output_imgs = prepare4streamlit(output_imgs, height, width)
                     video_array += output_imgs
@@ -209,6 +232,9 @@ def folder_video_input(model, confidence, batch_size, root_dir, cfg_model_path):
                     st3_text.markdown(f"**{fps:.2f}**")
                     st4_text.markdown(f"**{i}/{len_f} кадров**")
                 st4_text.markdown(f"**{len_f}/{len_f} кадров**")
+                extention_len = len(vid_file.split('.')[-1])
+                track_path = vid_file[:-extention_len] + 'json'
+                tracker.save(track_path)
                 
                 del vframes
                 

@@ -1,14 +1,17 @@
 import torch
 import numpy as np
+from typing import List
 
 
 def prepare4streamlit(batch, height, width):
-    start_x = (height - width) // 2
+    new_width = int(height * 1.2)
+    start_x = (new_width - width) // 2
     for img in batch:
-        padded_img = torch.zeros((height, height, 3))
+        padded_img = torch.zeros((height, new_width, 3))
         padded_img[:, start_x:start_x+width, :] = img
         img = padded_img
     return batch
+
 
 def xywh2xyxy(x):
     y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
@@ -21,7 +24,9 @@ def xywh2xyxy(x):
 def save_auto_annot(lbl_file, boxes, labels):
     result = ''
     for box, label in zip(boxes, labels):
-        result += f"{int(label)} {' '.join(list(map(str, box.tolist())))}\n"
+        for b, l in zip(box, label):
+            lbox = ' '.join(list(map(str, map(float, b))))
+            result += f"{int(l)} {lbox}\n"
     with open(lbl_file, 'w') as output:
         output.write(result)
 
@@ -31,3 +36,9 @@ def validate_bbox(x1, y1, x2, y2, w, h):
     if y1 < 0: y1 = 0
     if y2 > h: y2 = h - 1
     return x1, y1, x2, y2
+
+def tensor2list(t):
+    if isinstance(t, List):
+        return t
+    return t.tolist()
+    

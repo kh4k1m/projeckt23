@@ -4,6 +4,8 @@ from torchvision.ops import batched_nms
 import cv2
 from PIL import Image
 from typing import List
+from ultralytics import YOLO
+
 
 from t_utils import xywh2xyxy, validate_bbox
 
@@ -11,7 +13,10 @@ from t_utils import xywh2xyxy, validate_bbox
 class Detector:
     def __init__(self, model, confidence=0.25, nms_thresh=0.35, num_classes=5, draw_bbox=False):
         self.model = model
-        print(model.name)
+        if isinstance(model, YOLO):
+            self.model_type = 'ultra'
+        else:
+            self.model_type = 'yolov5'
         self.confidence = confidence
         self.nms_thresh = nms_thresh
         self.num_classes = num_classes
@@ -21,14 +26,38 @@ class Detector:
         self.model.conf = self.confidence
         if isinstance(img, torch.Tensor):
             prep_img = self.preprocessing(img.clone())
+            h, w = prep_img.shape[2:]
         else:
             prep_img = img
-        result = self.model(prep_img, size=size) if size else self.model(prep_img)
+            h, w = prep_img.shape[:2]
+        
+        size = (h, w)
+        if self.model_type == 'yolov5':
+            result = self.model(prep_img, size=size) if size else self.model(prep_img)
+        else:
+            
+            result = self.model.predict(prep_img,imgsz=size, half=True)
+            ploted_imgs = []
+            boxes = []
+            scores = []
+            labels = []
+            for r in result:
+                ploted_imgs +=[torch.from_numpy(r.plot())]
+                boxes +=[r.boxes.xywhn]
+                labels +=[r.boxes.cls]
+                scores +=[r.boxes.conf]
+            return  ploted_imgs,  boxes, scores, labels
         if isinstance(img, torch.Tensor):
             boxes, scores, labels, batch_index = self.postprocess(result)
             if self.draw_bbox:
                 drawed_img = [self.draw_bounding_boxes(img[i], boxes=boxes, labels=[str(x.detach()) for x in labels], batch_index=batch_index, i=i) for i in range(len(img))]
+            boxes = [self.batch_normalize_bbox(img[i], boxes, i, batch_index) for i in range(len(img))]
+            labels = [self.batch_normalize_label(img[i], labels, i, batch_index) for i in range(len(img))]
+            scores = [self.batch_normalize_score(img[i], scores, i, batch_index) for i in range(len(img))]
+            
+            if self.draw_bbox:
                 return drawed_img, boxes, scores, labels
+            
             return img, boxes, scores, labels
         result.render()
         image = Image.fromarray(result.ims[0])
@@ -39,6 +68,35 @@ class Detector:
     
     def preprocessing(self, img):
         return img / 255.0
+    
+    def batch_normalize_bbox(self, img, boxes, i, batch_index):
+        new_boxes = []
+        img_h, img_w = img.shape[1:]
+        for idx, box in enumerate(boxes):
+            if batch_index[idx] == i:
+                x1, y1, x2, y2 = box.tolist()
+                x0 = (x2 + x1) / (2 * img_w)
+                y0 = (y2 + y1) / (2 * img_h)
+                w = (x2 - x1) / img_w
+                h = (y2 - y1) / img_h
+                new_boxes += [[x0, y0, w, h]]
+        return new_boxes
+    
+    def batch_normalize_label(self, img, labels, i, batch_index):
+        new_labels = []
+        for idx, lbl in enumerate(labels):
+            if batch_index[idx] == i:
+                new_labels += [int(lbl)]
+        return new_labels
+    
+    def batch_normalize_score(self, img, scores, i, batch_index):
+        new_scores = []
+        for idx, scr in enumerate(scores):
+            if batch_index[idx] == i:
+                new_scores += [float(scr)]
+        return new_scores
+
+
     
     def draw_bounding_boxes(self, img, boxes, labels, batch_index, i):
         boxes = boxes.cpu().numpy().astype(int)
